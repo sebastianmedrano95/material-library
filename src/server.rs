@@ -1,5 +1,5 @@
 use crc32fast::Hasher as Crc32;
-use pbr_material_indexer::{scan_with_dimensions, Material, ScanProgress, ScanReport};
+use pbr_material_indexer::{scan_with_progress, Material, ScanProgress, ScanReport};
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -577,7 +577,10 @@ fn start_scan(app: &Arc<AppRuntime>, root: String) {
     let app = Arc::clone(app);
     thread::spawn(move || {
         let scan_root = PathBuf::from(root);
-        let result = scan_with_dimensions(&scan_root, |progress| record_progress(&app, progress));
+        // Keep discovery strictly filename-only. Image files are requested later by
+        // the browser as visible cards need them, so cloud-backed libraries are not
+        // hydrated during indexing.
+        let result = scan_with_progress(&scan_root, |progress| record_progress(&app, progress));
         match result {
             Ok(report) => finish_scan(&app, report),
             Err(error) => {
@@ -667,7 +670,7 @@ fn finish_scan(app: &AppRuntime, report: ScanReport) {
         "SCAN",
         "info",
         format!(
-            "Scan complete: {} materials · {} filenames checked · {} folders skipped. Read dimensions from albedo/diffuse headers only; no pixels were decoded.",
+            "Filename scan complete: {} materials · {} filenames checked · {} folders skipped. Preview images will load on demand in the browser.",
             material_count, report.files_examined, report.folders_skipped
         ),
     );

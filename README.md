@@ -4,7 +4,7 @@ A local PBR texture browser and filename-based material indexer, written in Rust
 
 ## Features
 
-- Recursively scans a folder and its subfolders by filename and extension. The desktop app probes dimensions from albedo/diffuse headers only; it never decodes image pixels for the index.
+- Recursively scans a folder and its subfolders by filename and extension. The desktop index pass does not open image files.
 - Groups recognized PBR maps by normalized material name and directory, independent of file extension.
 - Shows every material in one scrollable list. Original albedo/diffuse images load lazily in the browser and can use its HTTP cache; the app does not create or resize thumbnails.
 - Filters by map type, missing map type, file format, albedo resolution, favorites, and custom filename rules; sorts by name, resolution, or map count.
@@ -23,7 +23,7 @@ cargo run --release
 
 On Windows, `run-material-library.bat` starts the app. The web interface opens in your default browser. For an offline build, first fetch dependencies with `cargo fetch`, then use `cargo run --release --offline`.
 
-The scan reads directory entries and filenames, then probes image dimensions from albedo/diffuse headers only. It does not decode or transform pixels. Accessing a cloud-only image for header probing or display may cause the sync provider to hydrate the original file. The browser supports common web image formats; formats such as EXR, HDR, TIFF, or TGA may not display in every browser, but remain indexed. Favorites are stored in the operating system's per-user application configuration folder.
+The scan reads directory entries and filenames only. Once the index is ready, the browser requests original albedo/diffuse files as their cards enter view; it does not generate, resize, or transform thumbnails. The browser gets resolution from the image it has already loaded for display. Accessing a cloud-only preview may cause the sync provider to hydrate that original file. Formats such as EXR, HDR, TIFF, or TGA may not display in every browser, but remain indexed. Favorites are stored in the operating system's per-user application configuration folder.
 
 ## MCP server
 

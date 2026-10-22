@@ -35,6 +35,12 @@ function resolutionValue(material) {
   const size = anchorFor(material).dimensions;
   return size ? Math.max(size.width, size.height) : null;
 }
+function resolutionLabel(material) {
+  const size = anchorFor(material).dimensions;
+  const maximum = resolutionValue(material);
+  const text = maximum === null ? "Unknown" : maximum <= 512 ? "≤512" : maximum <= 1024 ? "1K" : maximum <= 2048 ? "2K" : maximum <= 4096 ? "4K" : maximum <= 8192 ? "8K" : "16K+";
+  return { text, title: size ? `${size.width} × ${size.height}` : "Resolution unknown" };
+}
 function matchesResolution(material, filter) {
   if (!filter) return true;
   const value = resolutionValue(material);
@@ -196,7 +202,23 @@ function render() {
       favorite.addEventListener("click", (event) => { event.stopPropagation(); toggleFavorite(Number(card.dataset.index)); });
     });
     $("#grid").querySelectorAll(".preview-image").forEach((image) => {
-      image.addEventListener("load", () => { state.loadedImages.add(image.dataset.path); $("#previewCount").textContent = state.loadedImages.size.toLocaleString(); }, { once: true });
+      image.addEventListener("load", () => {
+        state.loadedImages.add(image.dataset.path);
+        $("#previewCount").textContent = state.loadedImages.size.toLocaleString();
+        const material = state.materials.find((item) => item.anchor_candidates.some((candidate) => candidate.path === image.dataset.path));
+        const matchingMaps = material ? [material.anchor, ...material.anchor_candidates, ...material.textures].filter((texture) => texture.path === image.dataset.path) : [];
+        const anchor = matchingMaps[0];
+        if (anchor && (!anchor.dimensions || anchor.dimensions.width !== image.naturalWidth || anchor.dimensions.height !== image.naturalHeight)) {
+          for (const texture of matchingMaps) texture.dimensions = { width: image.naturalWidth, height: image.naturalHeight };
+          if (state.resolutionFilter || $("#sortSelect").value === "resolution-desc") {
+            render();
+          } else {
+            const label = resolutionLabel(material);
+            const resolution = image.closest(".material-card")?.querySelector(".card-foot span:last-child");
+            if (resolution) { resolution.textContent = label.text; resolution.title = label.title; }
+          }
+        }
+      }, { once: true });
       image.addEventListener("error", () => { const wrap = image.closest(".preview-wrap"); if (wrap) wrap.innerHTML = `<div class="preview-placeholder" title="This image format is not supported by the browser">▧</div>`; }, { once: true });
     });
   }
@@ -209,11 +231,9 @@ function cardHtml(material) {
   const image = imageUrl(anchor.path);
   const tags = material.textures.slice(0, 4).map((texture) => `<span class="map-tag ${texture.path === anchor.path ? "anchor" : ""}">${esc(texture.kind)}</span>`).join("");
   const additional = material.textures.length > 4 ? `<span class="map-tag">+${material.textures.length - 4}</span>` : "";
-  const dimensions = anchor.dimensions ? `${anchor.dimensions.width} × ${anchor.dimensions.height}` : "Resolution unknown";
-  const maximum = resolutionValue(material);
-  const resolution = maximum === null ? "Unknown" : maximum <= 512 ? "≤512" : maximum <= 1024 ? "1K" : maximum <= 2048 ? "2K" : maximum <= 4096 ? "4K" : maximum <= 8192 ? "8K" : "16K+";
+  const resolution = resolutionLabel(material);
   const anchorStatus = material.anchor_candidates.length > 1 ? `⚠ ${material.anchor_candidates.length} albedos` : esc(anchor.kind);
-  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><div class="preview-wrap"><img class="preview-image" src="${image}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${dimensions}">${resolution}</span></div></article>`;
+  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><div class="preview-wrap"><img class="preview-image" src="${image}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${esc(resolution.title)}">${resolution.text}</span></div></article>`;
 }
 function renderInspector() {
   const selected = state.materials.filter((item) => state.selectedMaterials.has(item.index));

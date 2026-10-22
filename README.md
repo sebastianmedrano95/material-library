@@ -4,9 +4,10 @@ A local PBR texture browser and filename-based material indexer, written in Rust
 
 ## Features
 
-- Recursively scans a folder and its subfolders by filename and extension. The scan does not open image data.
+- Recursively scans a folder and its subfolders by filename and extension. The desktop app probes dimensions from albedo/diffuse headers only; it never decodes image pixels for the index.
 - Groups recognized PBR maps by normalized material name and directory, independent of file extension.
 - Shows every material in one scrollable list. Original albedo/diffuse images load lazily in the browser and can use its HTTP cache; the app does not create or resize thumbnails.
+- Filters by map type, missing map type, file format, albedo resolution, favorites, and custom filename rules; sorts by name, resolution, or map count.
 - Displays the original image through a circular CSS crop. The source file is unchanged.
 - Supports filtering, searching, multi-selection, opening a material folder, copying an image URL, and downloading selected texture sets as a ZIP.
 - Provides an MCP stdio server with tools for scanning a chosen folder, searching indexed materials, and retrieving a material's maps.
@@ -22,7 +23,7 @@ cargo run --release
 
 On Windows, `run-material-library.bat` starts the app. The web interface opens in your default browser. For an offline build, first fetch dependencies with `cargo fetch`, then use `cargo run --release --offline`.
 
-The initial scan is a dry run: it reads directory entries and filenames, but not image bytes. Loading an image from a cloud-synced directory may cause the sync provider to download that original file. The browser supports common web image formats; formats such as EXR, HDR, TIFF, or TGA may not display in every browser, but remain indexed.
+The scan reads directory entries and filenames, then probes image dimensions from albedo/diffuse headers only. It does not decode or transform pixels. Accessing a cloud-only image for header probing or display may cause the sync provider to hydrate the original file. The browser supports common web image formats; formats such as EXR, HDR, TIFF, or TGA may not display in every browser, but remain indexed. Favorites are stored in the operating system's per-user application configuration folder.
 
 ## MCP server
 
@@ -53,9 +54,15 @@ You can also run from a source checkout with `cargo run --release -- --mcp --all
 
 ### MCP tools
 
-- `scan_material_library(root)`: recursively scans an allowed folder by filenames and keeps the result in the running MCP process. It does not open image data.
+- `scan_material_library(root)`: recursively scans an allowed folder by filenames and keeps the result in the running MCP process. It does not open image data or probe dimensions.
 - `search_materials(query?, map_type?, limit?, offset?)`: searches the most recent scan. The default limit is 50 and the maximum is 200.
 - `get_material_details(name, directory?)`: returns a material's albedo/diffuse candidates and associated map paths. Pass `directory` when names are ambiguous.
+
+### Browsing and filters
+
+Filter the index by map type, a missing common map, file format, or the albedo/diffuse image's pixel dimensions. Mark materials as favorites; the favorites list is saved in the per-user application configuration directory. Sort by material name, albedo resolution, or number of associated maps.
+
+Advanced filter rows follow Green Search's pattern operators: Contains, Does not contain, Starts with, Ends with, Is, and Is not. Add multiple rules to match all conditions, and use `*` and `?` wildcards. Rules can target the material name, folder, map filename, or map type.
 
 The agent host receives absolute paths from tool results. Only connect this local server to agents you trust, and allow only the folders you intend them to index. The tools currently read/index filenames only; they do not modify source textures or read image contents.
 

@@ -1,5 +1,5 @@
 use crc32fast::Hasher as Crc32;
-use pbr_material_indexer::{scan_with_progress, Material, ScanProgress, ScanReport};
+use pbr_material_indexer::{scan_with_dimensions, Material, ScanProgress, ScanReport};
 use serde_json::{json, Value};
 use std::collections::{HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
@@ -31,23 +31,33 @@ struct LibraryState {
     folders_skipped: usize,
     status: String,
     events: VecDeque<Event>,
+    favorites: HashSet<String>,
 }
 
 struct AppRuntime {
     state: Mutex<LibraryState>,
     shutdown: AtomicBool,
     token: String,
+    favorites_path: Option<PathBuf>,
 }
 
 impl AppRuntime {
     fn new(token: String) -> Self {
+        let favorites_path = favorites_path();
+        let favorites = favorites_path
+            .as_deref()
+            .and_then(|path| fs::read_to_string(path).ok())
+            .and_then(|contents| serde_json::from_str::<HashSet<String>>(&contents).ok())
+            .unwrap_or_default();
         Self {
             state: Mutex::new(LibraryState {
                 status: "Choose a folder to get started.".to_owned(),
+                favorites,
                 ..Default::default()
             }),
             shutdown: AtomicBool::new(false),
             token,
+            favorites_path,
         }
     }
 
@@ -84,6 +94,72 @@ impl AppRuntime {
                 "The requested path is not part of the current material index".to_owned()
             })
     }
+}
+
+fn favorites_path() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("APPDATA").or_else(|| std::env::var_os("LOCALAPPDATA"))?;
+        Some(
+            PathBuf::from(base)
+                .join("MaterialLibrary")
+                .join("favorites.json"),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("MaterialLibrary")
+                .join("favorites.json"),
+        )
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+        Some(base.join("material-library").join("favorites.json"))
+    }
+}
+
+fn write_favorites(path: &Path, favorites: &HashSet<String>) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid favorites path"))?;
+    fs::create_dir_all(parent)?;
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    let bytes = serde_json::to_vec(favorites).map_err(io::Error::other)?;
+    fs::write(&temporary, bytes)?;
+    match fs::rename(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) if path.exists() => {
+            fs::remove_file(path)?;
+            fs::rename(&temporary, path).map_err(|_| error)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(temporary);
+            Err(error)
+        }
+    }
+}
+
+fn save_favorites(app: &AppRuntime, favorites: HashSet<String>) -> Result<(), String> {
+    let path = app
+        .favorites_path
+        .as_deref()
+        .ok_or("Could not locate a user configuration folder for favorites")?;
+    write_favorites(path, &favorites)
+        .map_err(|error| format!("Could not save favorites: {error}"))?;
+    let mut state = app
+        .state
+        .lock()
+        .map_err(|_| "Application state unavailable")?;
+    state.favorites = favorites;
+    Ok(())
 }
 
 struct Request {
@@ -452,7 +528,8 @@ fn texture_value(texture: &pbr_material_indexer::Texture) -> Value {
     json!({
         "path": texture.path.to_string_lossy(),
         "filename": texture.path.file_name().unwrap_or_default().to_string_lossy(),
-        "kind": texture.kind.label()
+        "kind": texture.kind.label(),
+        "dimensions": texture.dimensions.map(|size| json!({"width":size.width,"height":size.height}))
     })
 }
 
@@ -477,6 +554,7 @@ fn state_value(app: &AppRuntime) -> Value {
         "status": state.status,
         "files_examined": state.files_examined,
         "folders_skipped": state.folders_skipped,
+        "favorites": state.favorites,
         "materials": state.materials.iter().enumerate().map(|(index, material)| material_value(index, material)).collect::<Vec<_>>(),
         "events": event_values(&state)
     })
@@ -499,7 +577,7 @@ fn start_scan(app: &Arc<AppRuntime>, root: String) {
     let app = Arc::clone(app);
     thread::spawn(move || {
         let scan_root = PathBuf::from(root);
-        let result = scan_with_progress(&scan_root, |progress| record_progress(&app, progress));
+        let result = scan_with_dimensions(&scan_root, |progress| record_progress(&app, progress));
         match result {
             Ok(report) => finish_scan(&app, report),
             Err(error) => {
@@ -589,7 +667,7 @@ fn finish_scan(app: &AppRuntime, report: ScanReport) {
         "SCAN",
         "info",
         format!(
-            "Dry run complete: {} materials · {} filenames checked · {} folders skipped. No image data was opened.",
+            "Scan complete: {} materials · {} filenames checked · {} folders skipped. Read dimensions from albedo/diffuse headers only; no pixels were decoded.",
             material_count, report.files_examined, report.folders_skipped
         ),
     );
@@ -652,6 +730,33 @@ fn handle_api(app: &Arc<AppRuntime>, request: &Request, stream: &mut TcpStream) 
             respond_json(stream, 200, json!({"ok":true,"name":"Material Library"}))
         }
         ("GET", "/api/state") => respond_json(stream, 200, state_value(app)),
+        ("POST", "/api/favorites") => {
+            let result = json_body(request).and_then(|body| {
+                let values = body
+                    .get("favorites")
+                    .and_then(Value::as_array)
+                    .ok_or("Favorites must be an array of material keys")?;
+                if values.len() > 20_000 {
+                    return Err("The favorites list is too large".to_owned());
+                }
+                let mut favorites = HashSet::with_capacity(values.len());
+                for value in values {
+                    let key = value
+                        .as_str()
+                        .ok_or("Every favorite must be a string key")?;
+                    if key.len() > 16_384 {
+                        return Err("A favorite key is too long".to_owned());
+                    }
+                    favorites.insert(key.to_owned());
+                }
+                save_favorites(app, favorites)?;
+                Ok(json!({"ok":true}))
+            });
+            match result {
+                Ok(value) => respond_json(stream, 200, value),
+                Err(error) => respond_json(stream, 400, json!({"error":error})),
+            }
+        }
         ("GET", "/api/events") => {
             let events = app
                 .state

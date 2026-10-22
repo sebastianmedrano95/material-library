@@ -24,9 +24,19 @@
     <section class="library-pane">
       <div class="library-heading">
         <div><div class="eyebrow green">LIBRARY</div><h1>Materials</h1><div id="summary" class="subheading">Choose a folder to get started</div></div>
-        <div class="view-controls"><label class="search-box"><span>⌕</span><input id="searchInput" placeholder="Search materials or maps…"></label><select id="sortSelect" aria-label="Sort materials"><option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option></select></div>
+        <div class="view-controls"><label class="search-box"><span>⌕</span><input id="searchInput" placeholder="Search materials or maps…"></label><select id="sortSelect" aria-label="Sort materials"><option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option><option value="resolution-desc">Resolution: highest first</option><option value="maps-desc">Map count: most first</option></select></div>
       </div>
-      <div class="filter-row"><div class="filter-chips"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="missing">Missing maps</button><button class="chip" data-filter="multiple">Multiple albedos</button></div><div class="selection-tools"><span id="selectedCount" class="page-summary">0 selected</span><button id="selectVisible" class="text-button">Select results</button><button id="clearSelection" class="text-button">Clear selection</button><span id="pageSummary" class="page-summary">0 results</span></div></div>
+      <div class="filter-row"><div class="filter-chips"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="multiple">Multiple albedos</button><button class="chip" data-filter="favorites">★ Favorites</button></div><div class="selection-tools"><span id="selectedCount" class="page-summary">0 selected</span><button id="selectVisible" class="text-button">Select results</button><button id="clearSelection" class="text-button">Clear selection</button><span id="pageSummary" class="page-summary">0 results</span></div></div>
+      <div class="facet-row" aria-label="Material filters">
+        <select id="mapTypeFilter" aria-label="Filter by map type"><option value="">Any map type</option></select>
+        <select id="missingMapFilter" aria-label="Filter by missing map"><option value="">No missing-map filter</option><option value="Normal">Missing Normal</option><option value="Roughness">Missing Roughness</option><option value="AO">Missing Ambient Occlusion</option><option value="Metallic">Missing Metallic</option><option value="Height">Missing Height</option><option value="Opacity / Alpha">Missing Opacity</option><option value="Specular">Missing Specular</option></select>
+        <select id="formatFilter" aria-label="Filter by file format"><option value="">Any file format</option></select>
+        <select id="resolutionFilter" aria-label="Filter by albedo resolution"><option value="">Any resolution</option><option value="512">Up to 512 px</option><option value="1k">Around 1K</option><option value="2k">Around 2K</option><option value="4k">Around 4K</option><option value="8k">Around 8K</option><option value="16k">Above 8K</option><option value="unknown">Unknown resolution</option></select>
+      </div>
+      <section class="rules-panel" aria-label="Advanced filters">
+        <div class="rules-heading"><div><strong>Advanced filters</strong><span>Match all rules · supports * and ? wildcards</span></div><div><button id="clearFilterRules" class="text-button">Clear rules</button><button id="clearAllFilters" class="text-button">Reset all</button><button id="addFilterRule" class="button small">+ Add filter</button></div></div>
+        <div id="filterRules" class="filter-rules"><div class="rules-empty">No custom filters. Add a rule to narrow results.</div></div>
+      </section>
       <div id="grid" class="material-grid"><div class="empty-state"><div class="empty-icon">◇</div><h2>Your materials, at a glance</h2><p>Choose a folder to index filenames and associate PBR maps. Image files are requested only as their cards come into view.</p><button class="button primary" id="emptyBrowse">Choose folder</button></div></div>
     </section>
     <aside class="inspector">

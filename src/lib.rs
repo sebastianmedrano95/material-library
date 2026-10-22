@@ -88,6 +88,13 @@ impl MapKind {
 pub struct Texture {
     pub path: PathBuf,
     pub kind: MapKind,
+    pub dimensions: Option<ImageDimensions>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImageDimensions {
+    pub width: usize,
+    pub height: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -120,6 +127,7 @@ struct FileInfo {
     base: String,
     display_name: String,
     kind: MapKind,
+    dimensions: Option<ImageDimensions>,
 }
 
 /// Walks a directory tree, grouping recognized maps by normalized base name
@@ -131,9 +139,25 @@ pub fn scan(root: impl AsRef<Path>) -> io::Result<ScanReport> {
 /// Like `scan`, but periodically reports traversal progress without opening files.
 pub fn scan_with_progress(
     root: impl AsRef<Path>,
-    mut on_progress: impl FnMut(ScanProgress),
+    on_progress: impl FnMut(ScanProgress),
 ) -> io::Result<ScanReport> {
-    let root = root.as_ref();
+    scan_internal(root.as_ref(), on_progress, false)
+}
+
+/// Like `scan_with_progress`, but probes metadata headers for albedo/diffuse images.
+/// It reads only image dimensions and never decodes or transforms pixel data.
+pub fn scan_with_dimensions(
+    root: impl AsRef<Path>,
+    on_progress: impl FnMut(ScanProgress),
+) -> io::Result<ScanReport> {
+    scan_internal(root.as_ref(), on_progress, true)
+}
+
+fn scan_internal(
+    root: &Path,
+    mut on_progress: impl FnMut(ScanProgress),
+    include_anchor_dimensions: bool,
+) -> io::Result<ScanReport> {
     if !root.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
@@ -163,7 +187,10 @@ pub fn scan_with_progress(
     files.sort();
     report.files_examined = files.len();
 
-    let infos: Vec<FileInfo> = files.into_iter().filter_map(inspect_file).collect();
+    let infos: Vec<FileInfo> = files
+        .into_iter()
+        .filter_map(|path| inspect_file(path, include_anchor_dimensions))
+        .collect();
     let mut groups: BTreeMap<(PathBuf, String), Vec<FileInfo>> = BTreeMap::new();
     for info in infos.iter().filter(|info| info.kind.is_anchor()) {
         groups
@@ -179,6 +206,7 @@ pub fn scan_with_progress(
             .map(|info| Texture {
                 path: info.path.clone(),
                 kind: info.kind,
+                dimensions: info.dimensions,
             })
             .collect();
         let anchor = anchor_candidates
@@ -191,6 +219,7 @@ pub fn scan_with_progress(
             .map(|info| Texture {
                 path: info.path.clone(),
                 kind: info.kind,
+                dimensions: info.dimensions,
             })
             .collect();
         textures.sort_by(|a, b| a.kind.cmp(&b.kind).then_with(|| a.path.cmp(&b.path)));
@@ -295,7 +324,7 @@ fn supported_extension(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn inspect_file(path: PathBuf) -> Option<FileInfo> {
+fn inspect_file(path: PathBuf, include_anchor_dimensions: bool) -> Option<FileInfo> {
     let stem = path.file_stem()?.to_str()?;
     let tokens: Vec<String> = stem
         .split(|character: char| !character.is_ascii_alphanumeric())
@@ -317,6 +346,14 @@ fn inspect_file(path: PathBuf) -> Option<FileInfo> {
     if base_tokens.is_empty() {
         return None;
     }
+    let dimensions = if include_anchor_dimensions && kind.is_anchor() {
+        imagesize::size(&path).ok().map(|size| ImageDimensions {
+            width: size.width,
+            height: size.height,
+        })
+    } else {
+        None
+    };
     let base = base_tokens.join("_");
     let display_name = base_tokens
         .iter()
@@ -335,6 +372,7 @@ fn inspect_file(path: PathBuf) -> Option<FileInfo> {
         base,
         display_name,
         kind,
+        dimensions,
     })
 }
 

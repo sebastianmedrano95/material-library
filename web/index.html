@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,10 +15,10 @@
     <span class="top-divider"></span><span class="eyebrow">PBR ASSET BROWSER</span>
     <div class="top-spacer"></div><span class="local-state"><i></i> Local</span>
   </header>
-  <nav class="toolbar" aria-label="Acciones principales">
+  <nav class="toolbar" aria-label="Main actions">
     <div class="path-control"><span class="path-icon">▣</span><input id="rootPath" placeholder="Choose a root folder…" spellcheck="false"><button id="browseBtn" class="button">Browse</button></div>
     <button id="scanBtn" class="button primary"><span>⌕</span> Scan materials</button>
-    <span class="toolbar-spacer"></span><button id="clearBtn" class="button quiet">Limpiar consola</button><button id="quitBtn" class="button quit">Salir</button>
+    <span class="toolbar-spacer"></span><button id="clearBtn" class="button quiet">Clear console</button><button id="quitBtn" class="button quit">Quit</button>
   </nav>
   <main class="app-layout">
     <section class="library-pane">
@@ -40,11 +40,19 @@
   <div id="folderModal" class="modal" hidden>
     <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle">
       <header class="folder-dialog-head"><div><div class="eyebrow green">LIBRARY SOURCE</div><h2 id="folderTitle">Choose a search folder</h2></div><button id="folderClose" class="icon-button" aria-label="Close">×</button></header>
-      <div id="folderLocation" class="folder-location">Unidades disponibles</div>
-      <div class="folder-nav"><button id="folderUp" class="button small" disabled>↑ Subir</button><span id="folderCount" class="muted-note"></span></div>
+      <div id="folderLocation" class="folder-location">Available drives</div>
+      <div class="folder-nav"><button id="folderUp" class="button small" disabled>↑ Up</button><span id="folderCount" class="muted-note"></span></div>
       <div id="folderList" class="folder-list"><div class="muted-note">Loading folders…</div></div>
       <footer class="folder-dialog-foot"><span id="folderHint" class="muted-note">The scan reads filenames and subfolders; image data is not opened.</span><div><button id="folderCancel" class="button">Cancel</button><button id="folderUse" class="button primary" disabled>Use this folder</button></div></footer>
     </section>
   </div>
+  <main id="quitScreen" class="quit-screen" hidden aria-live="polite">
+    <section class="quit-card" aria-labelledby="quitTitle">
+      <div class="quit-mark" aria-hidden="true">✓</div>
+      <div class="eyebrow green">MATERIAL LIBRARY</div>
+      <h1 id="quitTitle" tabindex="-1">You can close this tab now</h1>
+      <p>The local server has stopped.</p>
+    </section>
+  </main>
 </body>
 </html>

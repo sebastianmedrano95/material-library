@@ -152,7 +152,7 @@ async function loadFolders(path) {
     $("#folderList").querySelectorAll("[data-folder-path]").forEach((button) => button.onclick = () => loadFolders(button.dataset.folderPath));
     $("#folderUp").onclick = () => result.parent && loadFolders(result.parent);
   } catch (error) {
-    $("#folderLocation").textContent = path || "Unidades disponibles";
+    $("#folderLocation").textContent = path || "Available drives";
     $("#folderUp").disabled = !path;
     $("#folderCount").textContent = "";
     $("#folderList").innerHTML = `<div class="folder-empty"><span>!</span><strong>Could not list this folder</strong><small>${esc(error.message)}</small></div>`;
@@ -203,7 +203,24 @@ $("#sortSelect").onchange = render;
 document.querySelectorAll(".chip").forEach((chip) => chip.onclick = () => { document.querySelector(".chip.active")?.classList.remove("active"); chip.classList.add("active"); state.filter = chip.dataset.filter; render(); });
 async function clearEvents() { try { await api("/api/events/clear", { method: "POST", body: "{}" }); state.events = []; renderConsole(); } catch (error) { logLocal("error", error.message, "ERROR"); } }
 $("#clearBtn").onclick = clearEvents; $("#clearConsole").onclick = clearEvents;
-$("#quitBtn").onclick = async () => { try { await api("/api/shutdown", { method: "POST", body: "{}" }); clearInterval(state.pollTimer); $("#statusText").textContent = "Server stopped; you can close this tab."; logLocal("info", "Server stopped.", "SYSTEM"); } catch (error) { logLocal("error", `Could not stop server: ${error.message}`, "ERROR"); } };
+$("#quitBtn").onclick = async () => {
+  const button = $("#quitBtn");
+  button.disabled = true;
+  button.textContent = "Quitting…";
+  try {
+    await api("/api/shutdown", { method: "POST", body: "{}" });
+    clearInterval(state.pollTimer);
+    document.title = "Material Library — Closed";
+    for (const element of document.body.children) element.hidden = element.id !== "quitScreen";
+    document.body.classList.add("quit-page");
+    $("#quitScreen").hidden = false;
+    $("#quitTitle").focus();
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Quit";
+    logLocal("error", `Could not stop server: ${error.message}`, "ERROR");
+  }
+};
 $("#folderClose").onclick = closeFolderBrowser; $("#folderCancel").onclick = closeFolderBrowser; $("#folderUse").onclick = useCurrentFolder;
 $("#folderModal").addEventListener("click", (event) => { if (event.target === $("#folderModal")) closeFolderBrowser(); });
 $("#rootPath").addEventListener("input", (event) => { state.rootEdited = true; state.root = event.target.value; });

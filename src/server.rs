@@ -786,7 +786,7 @@ fn handle_api(app: &Arc<AppRuntime>, request: &Request, stream: &mut TcpStream) 
             respond_json(stream, 200, json!({"ok":true}));
         }
         ("POST", "/api/shutdown") => {
-            app.record("UI", "info", "Cierre solicitado");
+            app.record("UI", "info", "Quit requested");
             respond_json(stream, 200, json!({"ok":true}));
             app.shutdown.store(true, Ordering::SeqCst);
         }

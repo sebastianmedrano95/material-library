@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="app-token" content="__APP_TOKEN__">
+  <title>Material Library</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">✳</span><span>Material<span class="brand-light">Library</span></span></div>
+    <span class="top-divider"></span><span class="eyebrow">PBR ASSET BROWSER</span>
+    <div class="top-spacer"></div><span class="local-state"><i></i> Local</span>
+  </header>
+  <nav class="toolbar" aria-label="Acciones principales">
+    <div class="path-control"><span class="path-icon">▣</span><input id="rootPath" placeholder="Choose a root folder…" spellcheck="false"><button id="browseBtn" class="button">Browse</button></div>
+    <button id="scanBtn" class="button primary"><span>⌕</span> Scan materials</button>
+    <span class="toolbar-spacer"></span><button id="clearBtn" class="button quiet">Limpiar consola</button><button id="quitBtn" class="button quit">Salir</button>
+  </nav>
+  <main class="app-layout">
+    <section class="library-pane">
+      <div class="library-heading">
+        <div><div class="eyebrow green">LIBRARY</div><h1>Materials</h1><div id="summary" class="subheading">Choose a folder to get started</div></div>
+        <div class="view-controls"><label class="search-box"><span>⌕</span><input id="searchInput" placeholder="Search materials or maps…"></label><select id="sortSelect" aria-label="Sort materials"><option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option></select></div>
+      </div>
+      <div class="filter-row"><div class="filter-chips"><button class="chip active" data-filter="all">All</button><button class="chip" data-filter="missing">Missing maps</button><button class="chip" data-filter="multiple">Multiple albedos</button></div><div class="selection-tools"><span id="selectedCount" class="page-summary">0 selected</span><button id="selectVisible" class="text-button">Select results</button><button id="clearSelection" class="text-button">Clear selection</button><span id="pageSummary" class="page-summary">0 results</span></div></div>
+      <div id="grid" class="material-grid"><div class="empty-state"><div class="empty-icon">◇</div><h2>Your materials, at a glance</h2><p>Choose a folder to index filenames and associate PBR maps. Image files are requested only as their cards come into view.</p><button class="button primary" id="emptyBrowse">Choose folder</button></div></div>
+    </section>
+    <aside class="inspector">
+      <section class="side-section"><div class="eyebrow">SELECTION</div><h2 id="selectionTitle">No material selected</h2><p id="selectionPath" class="path-text">Select one or more cards to download their maps.</p><div class="action-stack"><button id="downloadSelectedBtn" class="button primary full" disabled>Download selection</button><button id="copyUrlBtn" class="button full" disabled>Copy albedo URL</button><button id="openFolderBtn" class="button full" disabled>Open folder</button></div></section>
+      <section class="side-section maps-section"><div class="section-title"><div><div class="eyebrow">TEXTURE SET</div><h3>Associated maps</h3></div><span id="mapCount" class="count-pill">0</span></div><div id="mapsList" class="maps-list"><div class="muted-note">This material's maps will appear here.</div></div></section>
+      <section class="side-section metadata-section"><div class="eyebrow">INDEX STATUS</div><div class="stat-row"><span>Files examined</span><strong id="filesCount">0</strong></div><div class="stat-row"><span>Folders skipped</span><strong id="skippedCount">0</strong></div><div class="stat-row"><span>Images loaded</span><strong id="previewCount">0</strong></div></section>
+    </aside>
+  </main>
+  <section class="console-panel"><div class="console-head"><div><div class="eyebrow">ACTIVITY</div><h2>Console</h2></div><div class="console-tools"><span id="eventCount">0 events</span><button id="clearConsole" class="text-button">Clear</button></div></div><div id="console" class="console-log" aria-live="polite"><div class="console-empty">Material Library is ready. Progress and errors will appear here.</div></div></section>
+  <footer class="statusbar"><span><i class="status-dot"></i><span id="statusText">Ready</span></span><span>Circular image view · original files unchanged</span></footer>
+  <div id="folderModal" class="modal" hidden>
+    <section class="folder-dialog" role="dialog" aria-modal="true" aria-labelledby="folderTitle">
+      <header class="folder-dialog-head"><div><div class="eyebrow green">LIBRARY SOURCE</div><h2 id="folderTitle">Choose a search folder</h2></div><button id="folderClose" class="icon-button" aria-label="Close">×</button></header>
+      <div id="folderLocation" class="folder-location">Unidades disponibles</div>
+      <div class="folder-nav"><button id="folderUp" class="button small" disabled>↑ Subir</button><span id="folderCount" class="muted-note"></span></div>
+      <div id="folderList" class="folder-list"><div class="muted-note">Loading folders…</div></div>
+      <footer class="folder-dialog-foot"><span id="folderHint" class="muted-note">The scan reads filenames and subfolders; image data is not opened.</span><div><button id="folderCancel" class="button">Cancel</button><button id="folderUse" class="button primary" disabled>Use this folder</button></div></footer>
+    </section>
+  </div>
+</body>
+</html>

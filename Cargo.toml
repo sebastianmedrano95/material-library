@@ -1,0 +1,17 @@
+[package]
+name = "pbr-material-indexer"
+version = "0.1.0"
+edition = "2021"
+description = "A local PBR material library browser and MCP server"
+license = "MIT"
+readme = "README.md"
+keywords = ["pbr", "textures", "materials", "mcp"]
+
+[dependencies]
+crc32fast = "1.5"
+serde_json = "1"
+url = "2.5"
+
+[lib]
+name = "pbr_material_indexer"
+path = "src/lib.rs"

@@ -195,8 +195,14 @@ fn scan_library(arguments: &Value, allowed_roots: &[PathBuf]) -> Result<Value, S
     }
     let root_path = std::fs::canonicalize(root)
         .map_err(|error| format!("Could not resolve the requested scan folder: {error}"))?;
-    if !allowed_roots.iter().any(|allowed| root_path.starts_with(allowed)) {
-        return Err("The requested folder is outside the MCP server's configured --allow-root folders.".to_owned());
+    if !allowed_roots
+        .iter()
+        .any(|allowed| root_path.starts_with(allowed))
+    {
+        return Err(
+            "The requested folder is outside the MCP server's configured --allow-root folders."
+                .to_owned(),
+        );
     }
     if !root_path.is_dir() {
         return Err("The requested scan path is not a folder.".to_owned());
@@ -224,7 +230,9 @@ fn parse_allowed_roots(arguments: &[String]) -> Result<Vec<PathBuf>, String> {
             return Err(format!("Unknown MCP option: {}", arguments[index]));
         }
         index += 1;
-        let raw = arguments.get(index).ok_or("--allow-root requires a folder path")?;
+        let raw = arguments
+            .get(index)
+            .ok_or("--allow-root requires a folder path")?;
         let root = std::fs::canonicalize(Path::new(raw))
             .map_err(|error| format!("Could not resolve allowed root '{raw}': {error}"))?;
         if !root.is_dir() {

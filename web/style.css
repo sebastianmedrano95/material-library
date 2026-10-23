@@ -26,3 +26,5 @@
 .favorite-toggle.active{color:#f1ce78}
 @media(max-width:1120px){.facet-row{grid-template-columns:repeat(2,minmax(120px,1fr))}}
 @media(max-width:760px){.facet-row{grid-template-columns:repeat(2,minmax(0,1fr))}.rules-panel{max-height:170px}.filter-rule{grid-template-columns:90px 110px minmax(75px,1fr) 25px}.rules-heading>div:first-child{align-items:flex-start;flex-direction:column;gap:2px}}
+/* Open the untouched diffuse/albedo source in a separate browser tab. */
+.preview-wrap{position:relative}.preview-open{position:absolute;right:12px;bottom:10px;width:30px;height:30px;display:grid;place-items:center;border:1px solid var(--border);border-radius:8px;background:#17211be8;color:var(--text);opacity:0;transform:translateY(3px);cursor:pointer;transition:opacity .15s,transform .15s,border-color .15s,color .15s}.material-card:hover .preview-open,.preview-open:focus-visible{opacity:1;transform:translateY(0)}.preview-open:hover{border-color:var(--green);color:var(--bright)}.preview-open svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}

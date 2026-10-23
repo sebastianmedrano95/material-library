@@ -200,6 +200,15 @@ function render() {
       check.addEventListener("click", (event) => { event.stopPropagation(); selectMaterial(Number(card.dataset.index)); });
       const favorite = card.querySelector(".favorite-toggle");
       favorite.addEventListener("click", (event) => { event.stopPropagation(); toggleFavorite(Number(card.dataset.index)); });
+      const openPreview = card.querySelector(".preview-open");
+      openPreview.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const material = state.materials.find((item) => item.index === Number(card.dataset.index));
+        if (!material) return;
+        const texture = anchorFor(material);
+        window.open(imageUrl(texture.path), "_blank", "noopener,noreferrer");
+        logLocal("info", `Opened original image: ${texture.path}`, "IMAGE");
+      });
     });
     $("#grid").querySelectorAll(".preview-image").forEach((image) => {
       image.addEventListener("load", () => {
@@ -233,7 +242,7 @@ function cardHtml(material) {
   const additional = material.textures.length > 4 ? `<span class="map-tag">+${material.textures.length - 4}</span>` : "";
   const resolution = resolutionLabel(material);
   const anchorStatus = material.anchor_candidates.length > 1 ? `⚠ ${material.anchor_candidates.length} albedos` : esc(anchor.kind);
-  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><div class="preview-wrap"><img class="preview-image" src="${image}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${esc(resolution.title)}">${resolution.text}</span></div></article>`;
+  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><div class="preview-wrap"><img class="preview-image" src="${image}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><button type="button" class="preview-open" title="Open original diffuse/albedo image" aria-label="Open original image for ${esc(material.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m15.5 15.5 5 5"></path></svg></button></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${esc(resolution.title)}">${resolution.text}</span></div></article>`;
 }
 function renderInspector() {
   const selected = state.materials.filter((item) => state.selectedMaterials.has(item.index));

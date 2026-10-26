@@ -176,6 +176,9 @@ function anchorFor(material) { return state.selectedAnchors.get(material.index) 
 function imageUrl(path) { return `/api/image?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`; }
 function previewUrl(path) { return `/api/thumbnail?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`; }
 function previewMarkup(material, anchor) {
+  // The filename scan and the preview choice are independent. Never let cards
+  // rendered behind the chooser trigger original-image requests prematurely.
+  if (!$("#scanModeModal").hidden) return `<div class="preview-placeholder" aria-label="Choose a preview mode to load images">◌</div>`;
   if (state.previewMode === "optimized") {
     if (state.thumbnailsReady.has(anchor.path)) return `<img class="preview-image" src="${previewUrl(anchor.path)}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async">`;
     if (!state.thumbnailsFailed.has(anchor.path)) return `<div class="preview-placeholder preview-pending" aria-label="Optimized preview is being prepared">◌</div>`;
@@ -438,8 +441,11 @@ async function scan() {
     state.root = root; state.rootEdited = false; state.scanning = true; state.thumbnailing = false; state.previewMode = "pure"; state.thumbnailsReady.clear(); state.thumbnailsFailed.clear();
     state.materials = []; state.selected = null; state.selectedMaterials.clear(); state.selectedAnchors.clear(); state.loadedImages.clear();
     $("#scanModeError").textContent = ""; $("#scanModeModal").hidden = false; $("#scanModeModal").classList.add("visible");
-    render(); if (!state.pollTimer) state.pollTimer = setInterval(refreshState, 1000);
+    render();
     await api("/api/scan", { method: "POST", body: JSON.stringify({ root }) });
+    // Start polling only after the server has synchronously cleared the previous
+    // index, so a slow scan request cannot briefly restore old image cards.
+    await refreshState();
   }
   catch (error) { state.scanning = false; $("#scanModeModal").hidden = true; $("#scanModeModal").classList.remove("visible"); logLocal("error", `Could not start scan: ${error.message}`, "ERROR"); render(); }
 }
@@ -452,7 +458,7 @@ async function chooseScanMode(mode) {
     state.previewMode = mode;
     $("#scanModeModal").hidden = true; $("#scanModeModal").classList.remove("visible");
     render();
-    if (!state.pollTimer && (state.scanning || mode === "optimized")) state.pollTimer = setInterval(refreshState, 1000);
+    await refreshState();
     logLocal("info", mode === "optimized" ? "Optimized library selected; generating cached previews after indexing." : "Pure library selected; displaying original texture files.", "PREVIEW");
   } catch (error) {
     $("#scanModeError").textContent = error.message;

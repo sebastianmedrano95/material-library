@@ -1,8 +1,9 @@
 use crc32fast::Hasher as Crc32;
 use pbr_material_indexer::{scan_with_progress, Material, ScanProgress, ScanReport};
 use serde_json::{json, Value};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
 use std::fs::{self, File, OpenOptions};
+use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
@@ -27,7 +28,16 @@ struct LibraryState {
     materials: Vec<Material>,
     texture_paths: HashSet<PathBuf>,
     scanning: bool,
+    scan_mode_selected: bool,
+    preview_mode: String,
+    thumbnailing: bool,
+    thumbnails_done: usize,
+    thumbnails_total: usize,
+    thumbnails_ready: HashSet<PathBuf>,
+    thumbnails_failed: HashSet<PathBuf>,
     files_examined: usize,
+    entries_seen: usize,
+    folders_seen: usize,
     folders_skipped: usize,
     status: String,
     events: VecDeque<Event>,
@@ -39,6 +49,7 @@ struct AppRuntime {
     shutdown: AtomicBool,
     token: String,
     favorites_path: Option<PathBuf>,
+    vips_program: Option<PathBuf>,
 }
 
 impl AppRuntime {
@@ -52,12 +63,14 @@ impl AppRuntime {
         Self {
             state: Mutex::new(LibraryState {
                 status: "Choose a folder to get started.".to_owned(),
+                preview_mode: "pure".to_owned(),
                 favorites,
                 ..Default::default()
             }),
             shutdown: AtomicBool::new(false),
             token,
             favorites_path,
+            vips_program: find_vipsthumbnail(),
         }
     }
 
@@ -124,6 +137,147 @@ fn favorites_path() -> Option<PathBuf> {
             .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
         Some(base.join("material-library").join("favorites.json"))
     }
+}
+
+fn find_vipsthumbnail() -> Option<PathBuf> {
+    let executable = if cfg!(windows) {
+        "vipsthumbnail.exe"
+    } else {
+        "vipsthumbnail"
+    };
+    let mut candidates = Vec::new();
+    if let Some(configured) = std::env::var_os("MATERIAL_LIBRARY_VIPS") {
+        let path = PathBuf::from(configured);
+        if path.is_dir() {
+            candidates.push(path.join(executable));
+            candidates.push(path.join("bin").join(executable));
+            if let Ok(children) = fs::read_dir(&path) {
+                candidates.extend(
+                    children
+                        .flatten()
+                        .map(|entry| entry.path().join("bin").join(executable)),
+                );
+            }
+        } else {
+            candidates.push(path);
+        }
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        candidates.extend(std::env::split_paths(&path).map(|directory| directory.join(executable)));
+    }
+    #[cfg(windows)]
+    if let Some(local_data) = std::env::var_os("LOCALAPPDATA") {
+        let path = PathBuf::from(local_data)
+            .join("MaterialLibrary")
+            .join("tools")
+            .join("libvips");
+        candidates.push(path.join(executable));
+        candidates.push(path.join("bin").join(executable));
+        if let Ok(children) = fs::read_dir(&path) {
+            candidates.extend(
+                children
+                    .flatten()
+                    .map(|entry| entry.path().join("bin").join(executable)),
+            );
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("MaterialLibrary")
+                .join("tools")
+                .join("libvips")
+                .join("bin")
+                .join(executable),
+        );
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    if let Some(home) = std::env::var_os("HOME") {
+        candidates.push(
+            PathBuf::from(home)
+                .join(".local")
+                .join("share")
+                .join("material-library")
+                .join("tools")
+                .join("libvips")
+                .join("bin")
+                .join(executable),
+        );
+    }
+    candidates.into_iter().find(|candidate| {
+        candidate.is_file()
+            && Command::new(candidate)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+    })
+}
+
+fn thumbnail_cache_root() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA").or_else(|| std::env::var_os("APPDATA"))?;
+        Some(
+            PathBuf::from(base)
+                .join("MaterialLibrary")
+                .join("cache")
+                .join("thumbnails"),
+        )
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var_os("HOME")?;
+        Some(
+            PathBuf::from(home)
+                .join("Library")
+                .join("Caches")
+                .join("MaterialLibrary")
+                .join("thumbnails"),
+        )
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let base = std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))?;
+        Some(base.join("material-library").join("thumbnails"))
+    }
+}
+
+fn thumbnail_cache_path(source: &Path) -> io::Result<PathBuf> {
+    let metadata = fs::metadata(source)?;
+    let modified = metadata
+        .modified()
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut hasher = DefaultHasher::new();
+    source.to_string_lossy().hash(&mut hasher);
+    metadata.len().hash(&mut hasher);
+    modified.hash(&mut hasher);
+    let root = thumbnail_cache_root()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Cache directory unavailable"))?;
+    Ok(root.join(format!("{:016x}.webp", hasher.finish())))
+}
+
+fn thumbnail_dimensions_path(cache: &Path) -> PathBuf {
+    cache.with_extension("json")
+}
+
+fn read_cached_dimensions(cache: &Path) -> Option<pbr_material_indexer::ImageDimensions> {
+    let metadata: Value =
+        serde_json::from_slice(&fs::read(thumbnail_dimensions_path(cache)).ok()?).ok()?;
+    Some(pbr_material_indexer::ImageDimensions {
+        width: usize::try_from(metadata.get("width")?.as_u64()?).ok()?,
+        height: usize::try_from(metadata.get("height")?.as_u64()?).ok()?,
+    })
 }
 
 fn write_favorites(path: &Path, favorites: &HashSet<String>) -> io::Result<()> {
@@ -551,8 +705,17 @@ fn state_value(app: &AppRuntime) -> Value {
     json!({
         "root": state.root,
         "scanning": state.scanning,
+        "preview_mode": state.preview_mode,
+        "thumbnailing": state.thumbnailing,
+        "thumbnails_done": state.thumbnails_done,
+        "thumbnails_total": state.thumbnails_total,
+        "thumbnails_ready": state.thumbnails_ready.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        "thumbnails_failed": state.thumbnails_failed.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        "vips_available": app.vips_program.is_some(),
         "status": state.status,
         "files_examined": state.files_examined,
+        "entries_seen": state.entries_seen,
+        "folders_seen": state.folders_seen,
         "folders_skipped": state.folders_skipped,
         "favorites": state.favorites,
         "materials": state.materials.iter().enumerate().map(|(index, material)| material_value(index, material)).collect::<Vec<_>>(),
@@ -562,15 +725,24 @@ fn state_value(app: &AppRuntime) -> Value {
 
 fn start_scan(app: &Arc<AppRuntime>, root: String) {
     if let Ok(mut state) = app.state.lock() {
-        if state.scanning {
+        if state.scanning || state.thumbnailing {
             return;
         }
         state.root = root.clone();
         state.materials.clear();
         state.texture_paths.clear();
         state.files_examined = 0;
+        state.entries_seen = 0;
+        state.folders_seen = 0;
         state.folders_skipped = 0;
         state.scanning = true;
+        state.scan_mode_selected = false;
+        state.preview_mode = "pure".to_owned();
+        state.thumbnailing = false;
+        state.thumbnails_done = 0;
+        state.thumbnails_total = 0;
+        state.thumbnails_ready.clear();
+        state.thumbnails_failed.clear();
         state.status = "Scanning map filenames…".to_owned();
     }
     app.record("SCAN", "info", format!("Scan started: {root}"));
@@ -641,6 +813,10 @@ fn folder_listing(path: Option<String>) -> Result<Value, String> {
 }
 
 fn record_progress(app: &AppRuntime, progress: ScanProgress) {
+    if let Ok(mut state) = app.state.lock() {
+        state.entries_seen = progress.entries_seen;
+        state.folders_seen = progress.folders_seen;
+    }
     app.record(
         "SCAN",
         "info",
@@ -653,10 +829,10 @@ fn record_progress(app: &AppRuntime, progress: ScanProgress) {
     );
 }
 
-fn finish_scan(app: &AppRuntime, report: ScanReport) {
+fn finish_scan(app: &Arc<AppRuntime>, report: ScanReport) {
     let material_count = report.materials.len();
     let materials = report.materials;
-    if let Ok(mut state) = app.state.lock() {
+    let should_build_thumbnails = if let Ok(mut state) = app.state.lock() {
         state.texture_paths = materials
             .iter()
             .flat_map(|material| material.textures.iter().map(|texture| texture.path.clone()))
@@ -665,7 +841,10 @@ fn finish_scan(app: &AppRuntime, report: ScanReport) {
         state.files_examined = report.files_examined;
         state.folders_skipped = report.folders_skipped;
         state.scanning = false;
-    }
+        state.scan_mode_selected && state.preview_mode == "optimized"
+    } else {
+        false
+    };
     app.record(
         "SCAN",
         "info",
@@ -674,6 +853,277 @@ fn finish_scan(app: &AppRuntime, report: ScanReport) {
             material_count, report.files_examined, report.folders_skipped
         ),
     );
+    if should_build_thumbnails {
+        start_thumbnail_generation(app);
+    }
+}
+
+fn select_scan_mode(app: &Arc<AppRuntime>, mode: &str) -> Result<(), String> {
+    if !matches!(mode, "pure" | "optimized") {
+        return Err("Choose either pure or optimized library mode.".to_owned());
+    }
+    if mode == "optimized" && app.vips_program.is_none() {
+        return Err("Optimized mode requires libvips. Install libvips and restart Material Library, or choose Pure Library.".to_owned());
+    }
+    let should_build = {
+        let mut state = app
+            .state
+            .lock()
+            .map_err(|_| "Application state unavailable")?;
+        state.preview_mode = mode.to_owned();
+        state.scan_mode_selected = true;
+        !state.scanning && mode == "optimized"
+    };
+    app.record(
+        "PREVIEW",
+        "info",
+        if mode == "optimized" {
+            "Optimized library selected. Original maps remain untouched; 256 px previews will be cached."
+        } else {
+            "Pure library selected. Original maps will be used for previews."
+        },
+    );
+    if should_build {
+        start_thumbnail_generation(app);
+    }
+    Ok(())
+}
+
+fn start_thumbnail_generation(app: &Arc<AppRuntime>) {
+    let Some(vips) = app.vips_program.clone() else {
+        app.record(
+            "ERROR",
+            "error",
+            "libvips is not installed; optimized previews cannot start.",
+        );
+        return;
+    };
+    let paths = {
+        let Ok(mut state) = app.state.lock() else {
+            return;
+        };
+        if state.thumbnailing || state.scanning || state.preview_mode != "optimized" {
+            return;
+        }
+        let mut paths: Vec<PathBuf> = state
+            .materials
+            .iter()
+            .flat_map(|material| {
+                material
+                    .anchor_candidates
+                    .iter()
+                    .map(|texture| texture.path.clone())
+            })
+            .collect();
+        paths.sort();
+        paths.dedup();
+        state.thumbnails_total = paths.len();
+        state.thumbnails_done = 0;
+        state.thumbnails_ready.clear();
+        state.thumbnails_failed.clear();
+        state.thumbnailing = true;
+        paths
+    };
+    app.record(
+        "PREVIEW",
+        "info",
+        format!(
+            "Generating or reusing 256 px previews for {} diffuse/albedo maps.",
+            paths.len()
+        ),
+    );
+    let app = Arc::clone(app);
+    thread::spawn(move || generate_thumbnails(app, paths, vips));
+}
+
+fn generate_thumbnails(app: Arc<AppRuntime>, paths: Vec<PathBuf>, vips: PathBuf) {
+    let mut pending = VecDeque::new();
+    for path in &paths {
+        match thumbnail_cache_path(path) {
+            Ok(cache) if cache.is_file() => {
+                if let Ok(mut state) = app.state.lock() {
+                    state.thumbnails_ready.insert(path.clone());
+                    state.thumbnails_done += 1;
+                    set_material_dimensions(
+                        &mut state.materials,
+                        path,
+                        read_cached_dimensions(&cache),
+                    );
+                }
+            }
+            Ok(_) => pending.push_back(path.clone()),
+            Err(error) => {
+                app.record(
+                    "ERROR",
+                    "error",
+                    format!(
+                        "Could not prepare thumbnail cache for {}: {error}",
+                        path.display()
+                    ),
+                );
+                pending.push_back(path.clone());
+            }
+        }
+    }
+    if pending.is_empty() {
+        if let Ok(mut state) = app.state.lock() {
+            state.thumbnailing = false;
+        }
+        app.record(
+            "PREVIEW",
+            "info",
+            "All optimized previews were already cached.",
+        );
+        return;
+    }
+
+    let pending = Arc::new(Mutex::new(pending));
+    let workers = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(4)
+        .clamp(1, 8)
+        .min(paths.len().max(1));
+    let mut handles = Vec::new();
+    for _ in 0..workers {
+        let app = Arc::clone(&app);
+        let pending = Arc::clone(&pending);
+        let vips = vips.clone();
+        handles.push(thread::spawn(move || loop {
+            let next = pending.lock().ok().and_then(|mut queue| queue.pop_front());
+            let Some(path) = next else { break };
+            let result = create_thumbnail(&vips, &path);
+            if let Ok(mut state) = app.state.lock() {
+                state.thumbnails_done += 1;
+                match &result {
+                    Ok((_, dimensions)) => {
+                        state.thumbnails_ready.insert(path.clone());
+                        set_material_dimensions(&mut state.materials, &path, *dimensions);
+                    }
+                    Err(_) => {
+                        state.thumbnails_failed.insert(path.clone());
+                    }
+                }
+                let done = state.thumbnails_done;
+                let total = state.thumbnails_total;
+                drop(state);
+                match result {
+                    Ok(_) if done == total || done % 10 == 0 => app.record(
+                        "PREVIEW",
+                        "info",
+                        format!("Optimized previews: {done}/{total}"),
+                    ),
+                    Err(error) => app.record(
+                        "ERROR",
+                        "error",
+                        format!("Thumbnail failed for {}: {error}", path.display()),
+                    ),
+                    _ => {}
+                }
+            }
+        }));
+    }
+    for handle in handles {
+        let _ = handle.join();
+    }
+    if let Ok(mut state) = app.state.lock() {
+        state.thumbnailing = false;
+        let ready = state.thumbnails_ready.len();
+        let total = state.thumbnails_total;
+        let failed = state.thumbnails_failed.len();
+        drop(state);
+        app.record(
+            "PREVIEW",
+            "info",
+            format!("Optimized preview cache ready: {ready}/{total} created or reused · {failed} unavailable."),
+        );
+    }
+}
+
+fn set_material_dimensions(
+    materials: &mut [Material],
+    path: &Path,
+    dimensions: Option<pbr_material_indexer::ImageDimensions>,
+) {
+    let Some(dimensions) = dimensions else {
+        return;
+    };
+    for material in materials {
+        for texture in material
+            .anchor_candidates
+            .iter_mut()
+            .chain(material.textures.iter_mut())
+            .chain(std::iter::once(&mut material.anchor))
+            .filter(|texture| texture.path == path)
+        {
+            texture.dimensions = Some(dimensions);
+        }
+    }
+}
+
+fn create_thumbnail(
+    vips: &Path,
+    source: &Path,
+) -> Result<(PathBuf, Option<pbr_material_indexer::ImageDimensions>), String> {
+    let cache = thumbnail_cache_path(source).map_err(|error| error.to_string())?;
+    if cache.is_file() {
+        return Ok((cache.clone(), read_cached_dimensions(&cache)));
+    }
+    let parent = cache.parent().ok_or("Invalid thumbnail cache path")?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not create cache directory: {error}"))?;
+    let temporary = cache.with_file_name(format!(
+        "{}.{}.tmp.webp",
+        cache
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .unwrap_or("preview"),
+        std::process::id()
+    ));
+    let output = format!("{}[Q=88]", temporary.to_string_lossy());
+    let status = Command::new(vips)
+        .arg(source)
+        .arg("--size=256x256")
+        .arg(format!("--path={output}"))
+        .arg("--vips-concurrency=1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map_err(|error| format!("Could not run libvips: {error}"))?;
+    if !status.success() {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("vipsthumbnail exited with {status}"));
+    }
+    if !temporary.is_file() {
+        return Err("libvips did not create the expected preview file".to_owned());
+    }
+    let dimensions =
+        imagesize::size(source)
+            .ok()
+            .map(|size| pbr_material_indexer::ImageDimensions {
+                width: size.width,
+                height: size.height,
+            });
+    if let Some(size) = dimensions {
+        let sidecar = thumbnail_dimensions_path(&cache);
+        let _ = fs::write(
+            sidecar,
+            serde_json::to_vec(&json!({"width":size.width,"height":size.height}))
+                .unwrap_or_default(),
+        );
+    }
+    match fs::rename(&temporary, &cache) {
+        Ok(()) => Ok((cache, dimensions)),
+        Err(_error) if cache.is_file() => {
+            let _ = fs::remove_file(temporary);
+            let dimensions = read_cached_dimensions(&cache).or(dimensions);
+            Ok((cache, dimensions))
+        }
+        Err(error) => {
+            let _ = fs::remove_file(temporary);
+            Err(format!("Could not store thumbnail: {error}"))
+        }
+    }
 }
 
 fn mime_for(path: &Path) -> &'static str {
@@ -823,6 +1273,20 @@ fn handle_api(app: &Arc<AppRuntime>, request: &Request, stream: &mut TcpStream) 
                 Err(error) => respond_json(stream, 400, json!({"error":error})),
             }
         }
+        ("POST", "/api/scan-mode") => {
+            let result = json_body(request).and_then(|body| {
+                let mode = body
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .ok_or("Missing scan mode")?;
+                select_scan_mode(app, mode)?;
+                Ok(json!({"ok":true,"mode":mode}))
+            });
+            match result {
+                Ok(value) => respond_json(stream, 200, value),
+                Err(error) => respond_json(stream, 400, json!({"error":error})),
+            }
+        }
         ("GET", "/api/image") => {
             match query_value(&request.target, "path").and_then(|path| app.authorized_path(&path)) {
                 Ok(path) => {
@@ -838,6 +1302,32 @@ fn handle_api(app: &Arc<AppRuntime>, request: &Request, stream: &mut TcpStream) 
                     app.record("ERROR", "error", format!("Could not read texture: {error}"));
                     respond_json(stream, 400, json!({"error":error}));
                 }
+            }
+        }
+        ("GET", "/api/thumbnail") => {
+            match query_value(&request.target, "path")
+                .and_then(|path| app.authorized_path(&path))
+                .and_then(|source| {
+                    let cache = thumbnail_cache_path(&source).map_err(|error| error.to_string())?;
+                    if cache.is_file() {
+                        Ok(cache)
+                    } else {
+                        Err("Optimized preview is not ready yet".to_owned())
+                    }
+                }) {
+                Ok(path) => {
+                    if let Err(error) = stream_original_image(stream, request, &path) {
+                        app.record(
+                            "ERROR",
+                            "error",
+                            format!(
+                                "Could not stream cached preview {}: {error}",
+                                path.display()
+                            ),
+                        );
+                    }
+                }
+                Err(error) => respond_json(stream, 404, json!({"error":error})),
             }
         }
         ("GET", "/api/file-url") => match query_value(&request.target, "path")

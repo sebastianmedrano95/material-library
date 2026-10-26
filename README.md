@@ -6,7 +6,7 @@ A local PBR texture browser and filename-based material indexer, written in Rust
 
 - Recursively scans a folder and its subfolders by filename and extension. The desktop index pass does not open image files.
 - Groups recognized PBR maps by normalized material name and directory, independent of file extension.
-- Shows every material in one scrollable list. Original albedo/diffuse images load lazily in the browser and can use its HTTP cache; the app does not create or resize thumbnails.
+- Shows every material in one scrollable list. Choose a pure library that lazily loads original albedo/diffuse images, or an optimized library that creates reusable 256 px WebP previews in the user cache.
 - Filters by map type, missing map type, file format, albedo resolution, favorites, and custom filename rules; sorts by name, resolution, or map count.
 - Displays the original image through a circular CSS crop. The source file is unchanged.
 - Supports filtering, searching, multi-selection, opening a material folder, copying an image URL, and downloading selected texture sets as a ZIP.
@@ -23,7 +23,7 @@ cargo run --release
 
 On Windows, `run-material-library.bat` starts the app. The web interface opens in your default browser. For an offline build, first fetch dependencies with `cargo fetch`, then use `cargo run --release --offline`.
 
-The scan reads directory entries and filenames only. Once the index is ready, the browser requests original albedo/diffuse files as their cards enter view; it does not generate, resize, or transform thumbnails. The browser gets resolution from the image it has already loaded for display. Accessing a cloud-only preview may cause the sync provider to hydrate that original file. Formats such as EXR, HDR, TIFF, or TGA may not display in every browser, but remain indexed. Favorites are stored in the operating system's per-user application configuration folder.
+The filename scan reads directory entries and filenames only. In pure mode, the browser requests original albedo/diffuse files as their cards enter view. In optimized mode, libvips creates 256 px WebP preview files in the operating system's user cache; source textures are never modified, and cached previews are reused while the source file's path, size, and modified time remain unchanged. Thumbnail generation runs in the background after indexing. It may cause a cloud sync provider to hydrate each original albedo/diffuse file. The original file remains available for opening and downloading. Optimized mode requires libvips. On Windows, install it with `powershell -ExecutionPolicy Bypass -File scripts/install-libvips.ps1`; on macOS or Linux, install it with the system package manager. libvips is licensed under LGPL-2.1-or-later and its official Windows package is downloaded by the installer script. Formats such as EXR, HDR, TIFF, or TGA may not display directly in every browser, but libvips supports a broad range of formats. Favorites are stored in the operating system's per-user application configuration folder.
 
 ## MCP server
 

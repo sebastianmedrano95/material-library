@@ -56,6 +56,24 @@
       <footer class="folder-dialog-foot"><span id="folderHint" class="muted-note">The scan reads filenames and subfolders; image data is not opened.</span><div><button id="folderCancel" class="button">Cancel</button><button id="folderUse" class="button primary" disabled>Use this folder</button></div></footer>
     </section>
   </div>
+  <div id="scanModeModal" class="modal" hidden>
+    <section class="scan-mode-dialog" role="dialog" aria-modal="true" aria-labelledby="scanModeTitle">
+      <div class="eyebrow green">PREVIEW MODE</div>
+      <h2 id="scanModeTitle">How would you like to browse?</h2>
+      <p class="scan-mode-intro">The filename scan is already running in the background. Choose how previews should be loaded.</p>
+      <div id="scanModeProgress" class="scan-mode-progress" aria-live="polite">The filename scan will continue in the background.</div>
+      <div class="scan-mode-options">
+        <button id="choosePureMode" class="scan-mode-option" type="button">
+          <span class="scan-mode-icon">▧</span><span><strong>Pure library</strong><small>Use original diffuse/albedo images as they are loaded today. No preview cache is created.</small></span><span class="scan-mode-arrow">›</span>
+        </button>
+        <button id="chooseOptimizedMode" class="scan-mode-option optimized" type="button">
+          <span class="scan-mode-icon">⚡</span><span><strong>Optimized library</strong><small id="optimizedModeHint">Creates reusable 256 px WebP previews. The original textures are never changed.</small></span><span class="scan-mode-arrow">›</span>
+        </button>
+      </div>
+      <p class="scan-mode-note">Optimized mode reads each diffuse/albedo to create its cache preview. OneDrive may download those original files on demand.</p>
+      <p id="scanModeError" class="scan-mode-error" role="alert"></p>
+    </section>
+  </div>
   <main id="quitScreen" class="quit-screen" hidden aria-live="polite">
     <section class="quit-card" aria-labelledby="quitTitle">
       <div class="quit-mark" aria-hidden="true">✓</div>

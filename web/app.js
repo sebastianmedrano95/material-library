@@ -1,6 +1,6 @@
 const token = document.querySelector('meta[name="app-token"]').content;
 const $ = (selector) => document.querySelector(selector);
-const state = { root: "", rootEdited: false, materials: [], events: [], selected: null, selectedMaterials: new Set(), filter: "all", query: "", mapTypeFilter: "", missingMapFilter: "", formatFilter: "", resolutionFilter: "", filterRules: [], selectedAnchors: new Map(), loadedImages: new Set(), favorites: new Set(), favoritesLoaded: false, favoritesSave: Promise.resolve(), facetsSignature: "", scanning: false, folderPath: null };
+const state = { root: "", rootEdited: false, materials: [], events: [], selected: null, selectedMaterials: new Set(), filter: "all", query: "", mapTypeFilter: "", missingMapFilter: "", formatFilter: "", resolutionFilter: "", filterRules: [], selectedAnchors: new Map(), loadedImages: new Set(), favorites: new Set(), favoritesLoaded: false, favoritesSave: Promise.resolve(), facetsSignature: "", scanning: false, thumbnailing: false, previewMode: "pure", vipsAvailable: false, thumbnailsReady: new Set(), thumbnailsFailed: new Set(), thumbnailsTotal: 0, folderPath: null };
 const missingMapAlternatives = {
   "Normal": ["Normal"],
   "Roughness": ["Roughness", "Glossiness / Smoothness", "Packed ORM", "Packed RMA", "Packed MRA"],
@@ -174,22 +174,80 @@ function currentList() {
 }
 function anchorFor(material) { return state.selectedAnchors.get(material.index) || material.anchor; }
 function imageUrl(path) { return `/api/image?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`; }
+function previewUrl(path) { return `/api/thumbnail?token=${encodeURIComponent(token)}&path=${encodeURIComponent(path)}`; }
+function previewMarkup(material, anchor) {
+  if (state.previewMode === "optimized") {
+    if (state.thumbnailsReady.has(anchor.path)) return `<img class="preview-image" src="${previewUrl(anchor.path)}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async">`;
+    if (!state.thumbnailsFailed.has(anchor.path)) return `<div class="preview-placeholder preview-pending" aria-label="Optimized preview is being prepared">◌</div>`;
+  }
+  return `<img class="preview-image" src="${imageUrl(anchor.path)}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`;
+}
+function attachPreviewImage(image) {
+  if (image.dataset.handlersAttached) return;
+  image.dataset.handlersAttached = "true";
+  image.addEventListener("load", () => {
+    state.loadedImages.add(image.dataset.path);
+    $("#previewCount").textContent = state.loadedImages.size.toLocaleString();
+    if (state.previewMode === "optimized") return;
+    const material = state.materials.find((item) => item.anchor_candidates.some((candidate) => candidate.path === image.dataset.path));
+    const matchingMaps = material ? [material.anchor, ...material.anchor_candidates, ...material.textures].filter((texture) => texture.path === image.dataset.path) : [];
+    const anchor = matchingMaps[0];
+    if (anchor && (!anchor.dimensions || anchor.dimensions.width !== image.naturalWidth || anchor.dimensions.height !== image.naturalHeight)) {
+      for (const texture of matchingMaps) texture.dimensions = { width: image.naturalWidth, height: image.naturalHeight };
+      if (state.resolutionFilter || $("#sortSelect").value === "resolution-desc") render();
+      else {
+        const label = resolutionLabel(material);
+        const resolution = image.closest(".material-card")?.querySelector(".card-foot span:last-child");
+        if (resolution) { resolution.textContent = label.text; resolution.title = label.title; }
+      }
+    }
+  }, { once: true });
+  image.addEventListener("error", () => {
+    const placeholder = document.createElement("div");
+    placeholder.className = "preview-placeholder";
+    placeholder.title = "This image format is not supported by the browser";
+    placeholder.textContent = "▧";
+    image.replaceWith(placeholder);
+  }, { once: true });
+}
+function updateReadyPreview(path) {
+  if (state.previewMode !== "optimized" || !state.thumbnailsReady.has(path)) return;
+  const material = state.materials.find((item) => item.anchor_candidates.some((candidate) => candidate.path === path));
+  if (!material || anchorFor(material).path !== path) return;
+  const card = [...$("#grid").querySelectorAll(".material-card")].find((item) => Number(item.dataset.index) === material.index);
+  const wrap = card?.querySelector(".preview-wrap");
+  if (!wrap || wrap.querySelector(".preview-image")) return;
+  const image = document.createElement("img");
+  image.className = "preview-image";
+  image.src = previewUrl(path);
+  image.dataset.path = path;
+  image.alt = material.name;
+  image.loading = "lazy";
+  image.decoding = "async";
+  attachPreviewImage(image);
+  wrap.prepend(image);
+  const label = resolutionLabel(material);
+  const resolution = card.querySelector(".card-foot span:last-child");
+  if (resolution) { resolution.textContent = label.text; resolution.title = label.title; }
+}
 function render() {
   updateFacetOptions();
   const list = currentList();
-  $("#summary").textContent = state.scanning ? "Scanning folders and filenames…" : `${state.materials.length.toLocaleString()} materials · ${state.root || "No folder selected"}`;
+  $("#summary").textContent = state.scanning ? "Scanning folders and filenames…" : state.thumbnailing ? `Preparing optimized previews · ${state.thumbnailsReady.size.toLocaleString()} ready` : `${state.materials.length.toLocaleString()} materials · ${state.root || "No folder selected"}`;
   $("#filesCount").textContent = Number(window.filesExamined || 0).toLocaleString();
   $("#skippedCount").textContent = Number(window.foldersSkipped || 0).toLocaleString();
   $("#previewCount").textContent = state.loadedImages.size.toLocaleString();
   $("#pageSummary").textContent = `${list.length.toLocaleString()} results`;
   $("#selectedCount").textContent = `${state.selectedMaterials.size.toLocaleString()} selected`;
-  $("#scanBtn").disabled = state.scanning;
-  $("#scanBtn").innerHTML = state.scanning ? "◌ Scanning…" : "⌕ Scan materials";
-  $("#statusText").textContent = state.scanning ? "Scan in progress" : "Ready";
-  $(".status-dot").classList.toggle("busy", state.scanning);
+  $("#scanBtn").disabled = state.scanning || state.thumbnailing;
+  $("#scanBtn").innerHTML = state.scanning ? "◌ Scanning…" : state.thumbnailing ? "◌ Optimizing…" : "⌕ Scan materials";
+  $("#statusText").textContent = state.scanning ? "Filename scan in progress" : state.thumbnailing ? `Optimizing previews · ${state.thumbnailsReady.size}/${state.thumbnailsTotal}` : "Ready";
+  $(".status-dot").classList.toggle("busy", state.scanning || state.thumbnailing);
   if (!state.materials.length && !state.scanning) {
     $("#grid").innerHTML = `<div class="empty-state"><div class="empty-icon">◇</div><h2>Your materials, at a glance</h2><p>Choose a folder to index filenames and associate PBR maps. Image files are requested only as their cards come into view.</p><button class="button primary" id="emptyBrowse">Choose folder</button></div>`;
     $("#emptyBrowse").onclick = browse;
+  } else if (!list.length && state.scanning) {
+    $("#grid").innerHTML = `<div class="empty-state"><div class="empty-icon busy">⌕</div><h2>Scanning your library</h2><p>Materials will appear here when the filename scan finishes. Image files are not opened during indexing.</p></div>`;
   } else if (!list.length) {
     $("#grid").innerHTML = `<div class="empty-state"><div class="empty-icon">⌕</div><h2>No results</h2><p>Try another filter or search term.</p></div>`;
   } else {
@@ -210,26 +268,7 @@ function render() {
         logLocal("info", `Opened original image: ${texture.path}`, "IMAGE");
       });
     });
-    $("#grid").querySelectorAll(".preview-image").forEach((image) => {
-      image.addEventListener("load", () => {
-        state.loadedImages.add(image.dataset.path);
-        $("#previewCount").textContent = state.loadedImages.size.toLocaleString();
-        const material = state.materials.find((item) => item.anchor_candidates.some((candidate) => candidate.path === image.dataset.path));
-        const matchingMaps = material ? [material.anchor, ...material.anchor_candidates, ...material.textures].filter((texture) => texture.path === image.dataset.path) : [];
-        const anchor = matchingMaps[0];
-        if (anchor && (!anchor.dimensions || anchor.dimensions.width !== image.naturalWidth || anchor.dimensions.height !== image.naturalHeight)) {
-          for (const texture of matchingMaps) texture.dimensions = { width: image.naturalWidth, height: image.naturalHeight };
-          if (state.resolutionFilter || $("#sortSelect").value === "resolution-desc") {
-            render();
-          } else {
-            const label = resolutionLabel(material);
-            const resolution = image.closest(".material-card")?.querySelector(".card-foot span:last-child");
-            if (resolution) { resolution.textContent = label.text; resolution.title = label.title; }
-          }
-        }
-      }, { once: true });
-      image.addEventListener("error", () => { const wrap = image.closest(".preview-wrap"); if (wrap) wrap.innerHTML = `<div class="preview-placeholder" title="This image format is not supported by the browser">▧</div>`; }, { once: true });
-    });
+    $("#grid").querySelectorAll(".preview-image").forEach(attachPreviewImage);
   }
   renderInspector();
 }
@@ -237,12 +276,12 @@ function cardHtml(material) {
   const selected = state.selectedMaterials.has(material.index);
   const favorite = state.favorites.has(favoriteKey(material));
   const anchor = anchorFor(material);
-  const image = imageUrl(anchor.path);
+  const preview = previewMarkup(material, anchor);
   const tags = material.textures.slice(0, 4).map((texture) => `<span class="map-tag ${texture.path === anchor.path ? "anchor" : ""}">${esc(texture.kind)}</span>`).join("");
   const additional = material.textures.length > 4 ? `<span class="map-tag">+${material.textures.length - 4}</span>` : "";
   const resolution = resolutionLabel(material);
   const anchorStatus = material.anchor_candidates.length > 1 ? `⚠ ${material.anchor_candidates.length} albedos` : esc(anchor.kind);
-  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><div class="card-actions"><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button></div><div class="preview-wrap"><img class="preview-image" src="${image}" data-path="${esc(anchor.path)}" alt="${esc(material.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer"><button type="button" class="preview-open" title="Open original diffuse/albedo image" aria-label="Open original image for ${esc(material.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m15.5 15.5 5 5"></path></svg></button></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${esc(resolution.title)}">${resolution.text}</span></div></article>`;
+  return `<article class="material-card ${selected ? "selected" : ""}" data-index="${material.index}"><div class="card-actions"><button type="button" class="favorite-toggle ${favorite ? "active" : ""}" aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${esc(material.name)}" aria-pressed="${favorite}" title="${favorite ? "Remove from" : "Add to"} favorites">★</button><button type="button" class="card-check" aria-label="${selected ? "Deselect" : "Select"} ${esc(material.name)}" aria-pressed="${selected}">${selected ? "✓" : ""}</button></div><div class="preview-wrap">${preview}<button type="button" class="preview-open" title="Open original diffuse/albedo image" aria-label="Open original image for ${esc(material.name)}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"></circle><path d="m15.5 15.5 5 5"></path></svg></button></div><div class="material-name" title="${esc(material.name)}">${esc(material.name)}</div><div class="material-folder" title="${esc(material.directory)}">${esc(material.directory)}</div><div class="map-tags">${tags}${additional}</div><div class="card-foot"><span>${material.textures.length} maps · ${anchorStatus}</span><span title="${esc(resolution.title)}">${resolution.text}</span></div></article>`;
 }
 function renderInspector() {
   const selected = state.materials.filter((item) => state.selectedMaterials.has(item.index));
@@ -301,13 +340,42 @@ function renderConsole() {
 async function refreshState() {
   try {
     const data = await api("/api/state");
+    const previousMaterialCount = state.materials.length;
+    const previousScanning = state.scanning;
+    const previousThumbnailing = state.thumbnailing;
+    const previousMode = state.previewMode;
+    const previousReady = state.thumbnailsReady;
+    const previousFailed = state.thumbnailsFailed;
     if (!state.rootEdited) { state.root = data.root || ""; $("#rootPath").value = state.root; }
     state.materials = data.materials || []; state.events = data.events || [];
     if (!state.favoritesLoaded) { state.favorites = new Set(data.favorites || []); state.favoritesLoaded = true; }
-    state.scanning = !!data.scanning; window.filesExamined = data.files_examined || 0; window.foldersSkipped = data.folders_skipped || 0;
-    render(); renderConsole();
-    if (state.scanning && !state.pollTimer) state.pollTimer = setInterval(refreshState, 1000);
-    else if (!state.scanning && state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+    state.scanning = !!data.scanning; state.thumbnailing = !!data.thumbnailing;
+    state.previewMode = data.preview_mode || "pure"; state.vipsAvailable = !!data.vips_available;
+    state.thumbnailsReady = new Set(data.thumbnails_ready || []); state.thumbnailsFailed = new Set(data.thumbnails_failed || []);
+    const newlyReady = [...state.thumbnailsReady].filter((path) => !previousReady.has(path));
+    const newlyFailed = [...state.thumbnailsFailed].filter((path) => !previousFailed.has(path));
+    window.filesExamined = data.files_examined || 0; window.foldersSkipped = data.folders_skipped || 0;
+    state.thumbnailsTotal = Number(data.thumbnails_total || 0);
+    $("#scanModeProgress").textContent = state.scanning
+      ? `Filename scan is running in the background · ${Number(data.entries_seen || 0).toLocaleString()} entries · ${Number(data.folders_seen || 0).toLocaleString()} folders`
+      : state.thumbnailing ? `Creating previews · ${state.thumbnailsReady.size.toLocaleString()} of ${state.thumbnailsTotal.toLocaleString()} ready`
+        : state.materials.length ? `Scan complete · ${state.materials.length.toLocaleString()} materials found` : "The filename scan will continue in the background.";
+    $("#optimizedModeHint").textContent = state.vipsAvailable
+      ? "Creates 256 px WebP cache previews with libvips. The original textures stay unchanged."
+      : "Install libvips with scripts/install-libvips.ps1 and restart the app. The pure library is available now.";
+    const structureChanged = previousMaterialCount !== state.materials.length || previousScanning !== state.scanning || previousThumbnailing !== state.thumbnailing || previousMode !== state.previewMode;
+    if (structureChanged || (newlyFailed.length && state.previewMode === "optimized") || ((state.resolutionFilter || $("#sortSelect").value === "resolution-desc") && newlyReady.length)) {
+      render();
+    } else {
+      newlyReady.forEach(updateReadyPreview);
+      if (state.thumbnailing) {
+        $("#summary").textContent = `Preparing optimized previews · ${state.thumbnailsReady.size.toLocaleString()} ready`;
+        $("#statusText").textContent = `Optimizing previews · ${state.thumbnailsReady.size}/${state.thumbnailsTotal}`;
+      }
+    }
+    renderConsole();
+    if ((state.scanning || state.thumbnailing) && !state.pollTimer) state.pollTimer = setInterval(refreshState, 1000);
+    else if (!state.scanning && !state.thumbnailing && state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
   } catch (error) { $("#statusText").textContent = `Connection error: ${error.message}`; }
 }
 async function browse() {
@@ -350,8 +418,30 @@ async function useCurrentFolder() {
 }
 async function scan() {
   const root = $("#rootPath").value.trim(); if (!root) { logLocal("error", "Choose a root folder before scanning.", "ERROR"); return; }
-  try { state.root = root; state.rootEdited = false; state.scanning = true; state.materials = []; state.selected = null; state.selectedMaterials.clear(); state.selectedAnchors.clear(); state.loadedImages.clear(); render(); if (!state.pollTimer) state.pollTimer = setInterval(refreshState, 1000); await api("/api/scan", { method: "POST", body: JSON.stringify({ root }) }); }
-  catch (error) { state.scanning = false; logLocal("error", `Could not start scan: ${error.message}`, "ERROR"); render(); }
+  try {
+    state.root = root; state.rootEdited = false; state.scanning = true; state.thumbnailing = false; state.previewMode = "pure"; state.thumbnailsReady.clear(); state.thumbnailsFailed.clear();
+    state.materials = []; state.selected = null; state.selectedMaterials.clear(); state.selectedAnchors.clear(); state.loadedImages.clear();
+    $("#scanModeError").textContent = ""; $("#scanModeModal").hidden = false; $("#scanModeModal").classList.add("visible");
+    render(); if (!state.pollTimer) state.pollTimer = setInterval(refreshState, 1000);
+    await api("/api/scan", { method: "POST", body: JSON.stringify({ root }) });
+  }
+  catch (error) { state.scanning = false; $("#scanModeModal").hidden = true; $("#scanModeModal").classList.remove("visible"); logLocal("error", `Could not start scan: ${error.message}`, "ERROR"); render(); }
+}
+async function chooseScanMode(mode) {
+  const buttons = [$("#choosePureMode"), $("#chooseOptimizedMode")];
+  buttons.forEach((button) => { button.disabled = true; });
+  $("#scanModeError").textContent = "";
+  try {
+    await api("/api/scan-mode", { method: "POST", body: JSON.stringify({ mode }) });
+    state.previewMode = mode;
+    $("#scanModeModal").hidden = true; $("#scanModeModal").classList.remove("visible");
+    render();
+    if (!state.pollTimer && (state.scanning || mode === "optimized")) state.pollTimer = setInterval(refreshState, 1000);
+    logLocal("info", mode === "optimized" ? "Optimized library selected; generating cached previews after indexing." : "Pure library selected; displaying original texture files.", "PREVIEW");
+  } catch (error) {
+    $("#scanModeError").textContent = error.message;
+    logLocal("error", error.message, "ERROR");
+  } finally { buttons.forEach((button) => { button.disabled = false; }); }
 }
 function downloadSelected() {
   const indices = [...state.selectedMaterials].sort((left, right) => left - right);
@@ -373,6 +463,7 @@ async function openFolder() {
   catch (error) { logLocal("error", `Could not open folder: ${error.message}`, "ERROR"); }
 }
 $("#browseBtn").onclick = browse; $("#scanBtn").onclick = scan;
+$("#choosePureMode").onclick = () => chooseScanMode("pure"); $("#chooseOptimizedMode").onclick = () => chooseScanMode("optimized");
 $("#downloadSelectedBtn").onclick = downloadSelected; $("#copyUrlBtn").onclick = copyUrl; $("#openFolderBtn").onclick = openFolder;
 $("#selectVisible").onclick = selectVisible; $("#clearSelection").onclick = () => { state.selectedMaterials.clear(); render(); };
 $("#searchInput").addEventListener("input", () => { state.query = $("#searchInput").value; render(); });

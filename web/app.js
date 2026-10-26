@@ -1,6 +1,6 @@
 const token = document.querySelector('meta[name="app-token"]').content;
 const $ = (selector) => document.querySelector(selector);
-const state = { root: "", rootEdited: false, materials: [], events: [], selected: null, selectedMaterials: new Set(), filter: "all", query: "", mapTypeFilter: "", missingMapFilter: "", formatFilter: "", resolutionFilter: "", filterRules: [], selectedAnchors: new Map(), loadedImages: new Set(), favorites: new Set(), favoritesLoaded: false, favoritesSave: Promise.resolve(), facetsSignature: "", scanning: false, thumbnailing: false, previewMode: "pure", vipsAvailable: false, thumbnailsReady: new Set(), thumbnailsFailed: new Set(), thumbnailsTotal: 0, folderPath: null };
+const state = { root: "", rootEdited: false, materials: [], events: [], selected: null, selectedMaterials: new Set(), filter: "all", query: "", mapTypeFilter: "", missingMapFilter: "", formatFilter: "", resolutionFilter: "", filterRules: [], selectedAnchors: new Map(), loadedImages: new Set(), favorites: new Set(), favoritesLoaded: false, favoritesSave: Promise.resolve(), facetsSignature: "", scanning: false, thumbnailing: false, previewMode: "pure", vipsAvailable: false, thumbnailsReady: new Set(), thumbnailsFailed: new Set(), thumbnailsActive: new Set(), thumbnailsTotal: 0, folderPath: null };
 const missingMapAlternatives = {
   "Normal": ["Normal"],
   "Roughness": ["Roughness", "Glossiness / Smoothness", "Packed ORM", "Packed RMA", "Packed MRA"],
@@ -243,6 +243,7 @@ function render() {
   $("#scanBtn").innerHTML = state.scanning ? "◌ Scanning…" : state.thumbnailing ? "◌ Optimizing…" : "⌕ Scan materials";
   $("#statusText").textContent = state.scanning ? "Filename scan in progress" : state.thumbnailing ? `Optimizing previews · ${state.thumbnailsReady.size}/${state.thumbnailsTotal}` : "Ready";
   $(".status-dot").classList.toggle("busy", state.scanning || state.thumbnailing);
+  updatePreviewProgress();
   if (!state.materials.length && !state.scanning) {
     $("#grid").innerHTML = `<div class="empty-state"><div class="empty-icon">◇</div><h2>Your materials, at a glance</h2><p>Choose a folder to index filenames and associate PBR maps. Image files are requested only as their cards come into view.</p><button class="button primary" id="emptyBrowse">Choose folder</button></div>`;
     $("#emptyBrowse").onclick = browse;
@@ -271,6 +272,19 @@ function render() {
     $("#grid").querySelectorAll(".preview-image").forEach(attachPreviewImage);
   }
   renderInspector();
+}
+function updatePreviewProgress() {
+  const panel = $("#previewProgress");
+  panel.hidden = !state.thumbnailing;
+  if (!state.thumbnailing) return;
+  const active = [...state.thumbnailsActive];
+  const shown = active.slice(0, 3);
+  const remaining = active.length - shown.length;
+  $("#previewProgressCount").textContent = `${state.thumbnailsReady.size.toLocaleString()} / ${state.thumbnailsTotal.toLocaleString()} ready`;
+  $("#previewProgressFiles").textContent = shown.length
+    ? `Converting: ${shown.join(" · ")}${remaining > 0 ? ` · +${remaining} more` : ""}`
+    : "Preparing the next images…";
+  $("#previewProgressFiles").title = active.join("\n");
 }
 function cardHtml(material) {
   const selected = state.selectedMaterials.has(material.index);
@@ -352,6 +366,7 @@ async function refreshState() {
     state.scanning = !!data.scanning; state.thumbnailing = !!data.thumbnailing;
     state.previewMode = data.preview_mode || "pure"; state.vipsAvailable = !!data.vips_available;
     state.thumbnailsReady = new Set(data.thumbnails_ready || []); state.thumbnailsFailed = new Set(data.thumbnails_failed || []);
+    state.thumbnailsActive = new Set(data.thumbnails_active || []);
     const newlyReady = [...state.thumbnailsReady].filter((path) => !previousReady.has(path));
     const newlyFailed = [...state.thumbnailsFailed].filter((path) => !previousFailed.has(path));
     window.filesExamined = data.files_examined || 0; window.foldersSkipped = data.folders_skipped || 0;
@@ -371,6 +386,7 @@ async function refreshState() {
       if (state.thumbnailing) {
         $("#summary").textContent = `Preparing optimized previews · ${state.thumbnailsReady.size.toLocaleString()} ready`;
         $("#statusText").textContent = `Optimizing previews · ${state.thumbnailsReady.size}/${state.thumbnailsTotal}`;
+        updatePreviewProgress();
       }
     }
     renderConsole();

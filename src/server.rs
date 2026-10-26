@@ -35,6 +35,7 @@ struct LibraryState {
     thumbnails_total: usize,
     thumbnails_ready: HashSet<PathBuf>,
     thumbnails_failed: HashSet<PathBuf>,
+    thumbnails_active: HashSet<String>,
     files_examined: usize,
     entries_seen: usize,
     folders_seen: usize,
@@ -702,6 +703,8 @@ fn state_value(app: &AppRuntime) -> Value {
     let Ok(state) = app.state.lock() else {
         return json!({"error":"Application state unavailable"});
     };
+    let mut thumbnails_active: Vec<String> = state.thumbnails_active.iter().cloned().collect();
+    thumbnails_active.sort();
     json!({
         "root": state.root,
         "scanning": state.scanning,
@@ -711,6 +714,7 @@ fn state_value(app: &AppRuntime) -> Value {
         "thumbnails_total": state.thumbnails_total,
         "thumbnails_ready": state.thumbnails_ready.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
         "thumbnails_failed": state.thumbnails_failed.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>(),
+        "thumbnails_active": thumbnails_active,
         "vips_available": app.vips_program.is_some(),
         "status": state.status,
         "files_examined": state.files_examined,
@@ -743,6 +747,7 @@ fn start_scan(app: &Arc<AppRuntime>, root: String) {
         state.thumbnails_total = 0;
         state.thumbnails_ready.clear();
         state.thumbnails_failed.clear();
+        state.thumbnails_active.clear();
         state.status = "Scanning map filenames…".to_owned();
     }
     app.record("SCAN", "info", format!("Scan started: {root}"));
@@ -921,6 +926,7 @@ fn start_thumbnail_generation(app: &Arc<AppRuntime>) {
         state.thumbnails_done = 0;
         state.thumbnails_ready.clear();
         state.thumbnails_failed.clear();
+        state.thumbnails_active.clear();
         state.thumbnailing = true;
         paths
     };
@@ -991,8 +997,24 @@ fn generate_thumbnails(app: Arc<AppRuntime>, paths: Vec<PathBuf>, vips: PathBuf)
         handles.push(thread::spawn(move || loop {
             let next = pending.lock().ok().and_then(|mut queue| queue.pop_front());
             let Some(path) = next else { break };
+            let display_path = if let Ok(mut state) = app.state.lock() {
+                let root = PathBuf::from(&state.root);
+                let display_path = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                state.thumbnails_active.insert(display_path.clone());
+                display_path
+            } else {
+                path.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            };
             let result = create_thumbnail(&vips, &path);
             if let Ok(mut state) = app.state.lock() {
+                state.thumbnails_active.remove(&display_path);
                 state.thumbnails_done += 1;
                 match &result {
                     Ok((_, dimensions)) => {
